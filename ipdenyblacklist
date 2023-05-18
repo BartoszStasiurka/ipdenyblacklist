@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+
+cdir=$(pwd)
+TMPDIR=/tmp/ipblacklist
+DESTFILE=$cdir/ipblacklist.txt
+DOWNLOADFILEURL=http://www.ipdeny.com/ipblocks/data/countries/all-zones.tar.gz
+DOWNLOADFILE=all-zones.tar.gz
+IPSETNAME=
+IPSETNAMEDEFAULT=ipdeny
+
+
+usage() {
+    cat << EOF # remove the space between << and EOF, this is due to web plugin issue
+Usage: $(basename "${BASH_SOURCE[0]}") command
+
+Available commands:
+
+download - Download blacklisted IPs.
+ipset-flush - Remove all IPs from ipset
+ipset-update <FILE> - Update ipset with given <FILE>
+
+EOF
+  exit
+}
+
+update() {
+
+    if [[ -z "$1" ]]; then
+        usage
+        exit
+    fi
+    if [[ ! -f "$1" ]]; then
+        echo "File $1 does not exists."
+        exit
+    fi
+
+    flush
+    firewall-cmd --permanent --ipset="$IPSETNAME" --add-entries-from-file="$1"
+    # echo "Remember firewall-cmd --reload to activate changes"
+}
+
+flush() {
+    FLUSH_TMP_FILE=$(mktemp)
+    if [[ -z "$IPSETNAME" ]]; then
+        read -p "Firewall IPSet name: [$IPSETNAMEDEFAULT]: " IPSETNAME
+        IPSETNAME=${IPSETNAME:-$IPSETNAMEDEFAULT}
+    fi
+    firewall-cmd --permanent --ipset="$IPSETNAME" --get-entries > "$FLUSH_TMP_FILE" 
+    firewall-cmd --permanent --ipset="$IPSETNAME" --remove-entries-from-file="$FLUSH_TMP_FILE"
+    rm -f "$FLUSH_TMP_FILE"
+}
+
+
+download() {
+    echo "Creating tmp dir: $TMPDIR"
+    mkdir -p $TMPDIR
+    rm -Rf $TMPDIR
+
+    echo "Downloading: $DOWNLOADFILEURL"
+    cd $TMPDIR
+    curl -LO $DOWNLOADFILEURL
+    if [[ ! -f $DOWNLOADFILE ]] ; then
+        echo 'File $DOWNLOADFILE not found, aborting.'
+        exit
+    fi
+
+    tar xf $DOWNLOADFILE
+
+    read -p "Destination file [$DESTFILE]: " dest
+    dest=${dest:-$DESTFILE}
+    find ./ -maxdepth 1 -name "*.zone" | xargs cat > $dest
+    rm -Rf $TMPDIR
+    cd $cdir;
+}
+
+if [ $# == 0 ] ; then
+    usage
+    exit 1;
+fi
+
+case "$1" in 
+    "download") 
+    download
+    exit
+    ;;
+    "ipset-flush") 
+    flush
+    exit
+    ;;
+    "ipset-update") 
+    update "$2"
+    exit
+    ;;
+    *)
+    usage
+    exit;
+    ;;
+esac
+
+echo $1
